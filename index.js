@@ -6,13 +6,16 @@ import { join } from 'path';
 import dotenv from 'dotenv';
 import { randomBytes } from 'crypto';
 import mongoose from 'mongoose';
-import imgur from 'imgur';
+import admin from 'firebase-admin';
 
 const app = express();
+const firebaseConfig = {
+  credential: admin.credential.cert(JSON.parse(process.env.SERVICE_ACCOUNT_KEY)),
+  storageBucket: "codepulse-india.appspot.com"
+};
+const storage = admin.initializeApp(firebaseConfig).storage();
 
 dotenv.config();
-
-imgur.setClientId(process.env.IMGUR_CLIENT_ID);
 
 const dbURI = process.env.MONGODB_URI;
 mongoose.connect(dbURI);
@@ -68,31 +71,24 @@ async function getProLLMResponse(prompt) {
             body: JSON.stringify(data)
         });
 
-        if (!response.ok) {
-            throw new Error('Failed to get response from backend server');
-        }
-
         const json = await response.json();
         const imageUrl = `https://storage.googleapis.com/pai-images/${json.images[0].imageKey}.jpeg`;
 
         const imageResponse = await fetch(imageUrl);
-        if (!imageResponse.ok) {
-            throw new Error('Failed to download image from backend server');
-        }
-
         const buffer = await imageResponse.buffer();
 
         const tempFilePath = join(tmpdir(), `${Date.now()}.jpeg`);
         await fsPromises.writeFile(tempFilePath, buffer);
 
-        // Upload image to Imgur
-        const imgurResponse = await imgur.uploadBase64(buffer.toString('base64'));
-        if (!imgurResponse.data.link) {
-            throw new Error('Failed to upload image to Imgur');
-        }
-        const imgurImageUrl = imgurResponse.data.link;
+        // Upload image to Firebase Storage
+        const bucket = storage.bucket();
+        const firebaseFileName = `images/${Date.now()}.jpeg`;
+        await bucket.file(firebaseFileName).save(buffer);
 
-        return imgurImageUrl;
+        // Generate public URL for the uploaded image
+        const firebaseImageUrl = `https://storage.googleapis.com/${firebaseConfig.storageBucket}/${firebaseFileName}`;
+
+        return firebaseImageUrl;
     } catch (error) {
         return { error: 'Internal server error. Please try again later.' };
     }
@@ -135,7 +131,7 @@ app.get('/prompt', async (req, res) => {
             return res.status(500).json({ error: imageUrl.error });
         }
 
-        res.status(200).json({ code: 200, url: imageUrl });
+        res.json({ code: 200, url: imageUrl });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal server error. Please try again later.' });
