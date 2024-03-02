@@ -131,7 +131,7 @@ app.get('/prompt', async (req, res) => {
             return res.status(500).json({ error: imageUrl.error });
         }
 
-        res.json({ code: 200, url: imageUrl });
+        res.status(200).json({ imageUrl: imageUrl }); // Sending imageUrl in 200 response
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Internal server error. Please try again later.' });
